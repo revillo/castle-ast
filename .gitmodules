@@ -1,0 +1,6 @@
+[submodule "x3"]
+	path = x3
+	url = https://github.com/revillo/x3.git
+[submodule "multiplayer-tests"]
+	path = multiplayer-tests
+	url = https://github.com/nikki93/multiplayer-tests.git
