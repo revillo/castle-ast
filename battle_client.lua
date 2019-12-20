@@ -6,9 +6,15 @@ local mods = require("client_base");
 local Sound = require("lib/sound")
 local LASER_SPEED = 50;
 local PLAYER_RADIUS = 1;
+local SHIP_FRICTION = 1.0;
+local SHIP_ACCEL = 10;
+local ARENA_RADIUS = 30;
+
 local POD_SPEED = 5;
 
 x3 = mods.x3;
+local Y_AXIS = x3.vec3(0,1,0); 
+
 GameClient = mods.GameClient;
 GameCommon = mods.GameCommon;
 
@@ -17,6 +23,20 @@ require("battle_common.lua");
 
 local Assets = {
     Pod = x3.loadObj("assets/pod.obj")
+}
+
+local Meshes = {
+    Particle = x3.mesh.newSphere(1,5,5)
+}
+
+local Materials = {
+    Particle = x3.material.newUnlit({
+        emissiveColor = {1.0, 0.5, 0.5}
+    })
+}
+
+local Images = {
+    Checker = love.graphics.newImage("assets/img/checker.jpg")
 }
 
 local Audio = {
@@ -33,7 +53,10 @@ function GameViewer:init()
 
     self.numLasers = 0;
     self.laserData = {};
+    self.bursts = {};
+    self.numBursts = 0;
  
+    --[[
     self.moons = x3.newEntity(
         x3.mesh.newSphere(1.0, 16, 16),
         x3.material.newLit({
@@ -45,6 +68,7 @@ function GameViewer:init()
     self.scene:add(self.moons);
     self.moons:setPosition(0,0,0);
     self.moons:hide();
+]]
 
     self.stars = x3.newEntity(
         x3.mesh.newSphere(0.5, 4, 4),
@@ -86,7 +110,7 @@ function GameViewer:init()
         x3.mesh.newSphere(0.05,16,16),
         x3.material.newUnlit({
             baseColor = {0,0,0},
-            emissiveColor = {0.0,0.9,1.0}
+            emissiveColor = {1.0,0.5,0.5}
         })
     );
 
@@ -124,6 +148,34 @@ function GameViewer:init()
         self.scene:add(self.podEntities[meshName]);
     end
 
+    local shieldShaderOpts = {
+        defines = {
+            LIGHTS = 0,
+            INSTANCES = 1
+        },
+
+        transparent = true,
+
+        shadeFragment = [[
+            vec3 normal = getNormal();
+            vec3 toEye = normalize(u_WorldCameraPosition - v_WorldPosition);
+            float dt = dot(toEye, normal) * 0.5 + 0.5;
+            float alpha = (1.0-dt);
+            outColor.rgba = v_InstanceColor;
+            outColor.a *= pow(alpha, 0.5);
+        ]]
+    };
+
+    self.podEntities.shield = x3.newEntity(
+        x3.mesh.newSphere(PLAYER_RADIUS * 1.3, 16, 16),
+        x3.material.newCustom(
+            x3.shader.newCustom(shieldShaderOpts), 
+            {} --uniforms
+        )
+    );
+
+    self.scene:add(self.podEntities.shield);
+
     self.sun = x3.newPointLight({
         color = {1,1,1},
         position = x3.vec3(0, 10, 0),
@@ -155,12 +207,12 @@ function GameViewer:drawHUD(player)
 
     love.graphics.setColor(0.2, 0.7, 1.0, 1.0);
     love.graphics.rectangle("line", ox, h - 100, sx, sy)
-    love.graphics.setColor(0.2, 0.7, 1.0, 0.7);
+    love.graphics.setColor(0.2, 0.7, 1.0, 0.8);
     love.graphics.rectangle("fill", ox, h - 100, sx * player.shield, sy)
 
     love.graphics.setColor(1.0, 0.2, 0.2, 1.0);
     love.graphics.rectangle("line", ox, h - 80, sx, sy)
-    love.graphics.setColor(1.0, 0.2, 0.2, 0.7);
+    love.graphics.setColor(1.0, 0.2, 0.2, 0.8);
     love.graphics.rectangle("fill", ox, h - 80, sx * player.health, sy)
 
 end
@@ -178,6 +230,7 @@ end
 local moonColLow = x3.vec3(0.9);
 local moonColHi = x3.vec3(1.0);
 
+--[[
 function GameViewer:setMoons(numMoons, moonPositions, moonScales)
 
 
@@ -195,6 +248,55 @@ function GameViewer:setMoons(numMoons, moonPositions, moonScales)
         self.moons:getInstance(i).color:randomCube(moonColLow, moonColHi);
     end
     
+end]]
+
+function GameViewer:addBurst(pos)
+
+    print("spawn", pos:__tostring());
+    self.numBursts = self.numBursts+1;
+    self.bursts[self.numBursts] = x3.newEntity(
+        Meshes.Particle,
+        Materials.Particle
+    );
+
+    local b = self.bursts[self.numBursts];
+    b:setPosition(pos);
+    b.age = 0;
+
+    b:setNumInstances(30);
+    
+    for i = 1,b:getNumInstances() do
+        local ins =  b:getInstance(i);
+
+        local p = ins:getPosition();
+        p:fromSphere(math.random() * 6, math.random() * 6, 0.01);
+        ins:setPosition(p);
+        ins:setScale(0.1);
+        p:normalize();
+        ins:orient(p, Y_AXIS);
+    end
+
+    self.scene:add(b);
+
+end
+
+function GameViewer:updateBursts(dt)
+
+    for bid,b in pairs(self.bursts) do
+        
+        for i = 1,b:getNumInstances() do
+            b:getInstance(i):moveLocalZ(-dt * 10);
+        end
+
+        b.age = b.age + dt;
+
+        if (b.age > 0.2) then
+            print("remove");
+            self.scene:remove(b);
+            self.bursts[bid] = nil; 
+        end
+    end
+
 end
 
 function GameViewer:updateLasers(dt)
@@ -213,6 +315,9 @@ function GameViewer:updateLasers(dt)
         local ins = self.lasers:getInstance(i);
         ins:setPosition(laser.ray:at(laser.t));
         laser.t = laser.t + dt * LASER_SPEED;
+        ins:orient(laser.ray.direction, Y_AXIS);
+        ins:setScale(1,1,10);
+        
 
         --print(laser.t, laser.dist);
         --ins.origin:print();
@@ -220,6 +325,7 @@ function GameViewer:updateLasers(dt)
         if (laser.t > laser.dist) then
             self.laserData[id] = nil;
             self.numLasers = self.numLasers - 1;
+            self:addBurst(laser.ray:at(laser.dist));
         end
     end
 end
@@ -228,6 +334,7 @@ function GameViewer:update(dt)
 
     self.sun:copyPosition(self.camera);
     self:updateLasers(dt);
+    self:updateBursts(dt);
 
 end
 
@@ -326,12 +433,12 @@ function GameClient:fire()
     self.fireRay = fireRay;
 
     fireRay.origin:copy(GameViewer.camera:getPosition());
-    GameViewer.camera:getLocalZAxis(fireRay.direction);
+    GameViewer.camera:getRelZAxis(fireRay.direction);
 
-    local camY = GameViewer.camera:getLocalYAxis();
+    local camY = GameViewer.camera:getRelYAxis();
     fireRay.origin:addScaled(camY, -0.3);
 
-    local camX = GameViewer.camera:getLocalXAxis();
+    local camX = GameViewer.camera:getRelXAxis();
     fireRay.origin:addScaled(camX, self.laserSide * 0.2);
 
     fireRay.direction:normalize();
@@ -344,7 +451,6 @@ function GameClient:fire()
 
     print("hitd", dist);
 
-    dist = 50;
     GameViewer:addLaser(id, fireRay, dist or 50);
         
     local msgKind = 'laserMiss';
@@ -366,6 +472,31 @@ function GameClient:resize()
     GameViewer:resize();
 end
 
+function GameClient:initArena()
+
+
+    self.collider:addInvereSphere("arenaSphere", x3.vec3(0.0), ARENA_RADIUS, {
+
+    });
+
+    local arenaRoot = x3.newEntity();
+
+    local arenaSphere = x3.newEntity(
+        x3.mesh.newSphere(ARENA_RADIUS, 24, 24, true --[[flip sides]]),
+        x3.material.newLit({
+            baseColor = {1,1,1},
+            hemiColors = {{0.3,0.3,0.3}, {0.1, 0.1, 0.1}},
+            --emissiveColor = {0.3, 0.3, 0.3},
+            baseTexture = Images.Checker,
+            --emissiveTexture = Images.Checker
+        })
+    );
+
+    arenaRoot:add(arenaSphere);
+    GameViewer.scene:add(arenaRoot);
+
+end
+
 function GameClient:start()
     print("initing...")
     GameViewer:init();
@@ -373,9 +504,16 @@ function GameClient:start()
     self:init();
     print("inited");
 
+
     self.timer = x3.newTimer();
     self.collider = x3.newCollider();
     self.laserId = 0;
+
+    self:initArena();
+
+    self.velocity = x3.vec3(0.0);
+
+    --[[
     local numMoons = 40;
 
     local moonLocs = {};
@@ -399,12 +537,16 @@ function GameClient:start()
     end
 
     GameViewer:setMoons(numMoons, moonLocs, moonSizes);
-
+    ]]
 end
 
 function GameClient:keypressed(key)
     if (key == "space") then
       love.mouse.setRelativeMode(not love.mouse.getRelativeMode())
+    end
+
+    if (key == "r") then
+        self:resetPlayer();
     end
 end
 
@@ -417,10 +559,21 @@ function GameClient:handleLaser(rayData, dist)
     self.laserId = self.laserId + 1;
     rayTemp:deserialize(rayData);
     GameViewer:addLaser(self.laserId, rayTemp, dist);
-
-    print("HandleLaser");
 end
 
+local ZERO = x3.vec3(0.0);
+
+function GameClient:resetPlayer()
+
+    local pos = x3.vec3();
+    pos:fromSphere(math.random() * 6, math.random() * 6, ARENA_RADIUS - 3);
+    GameViewer.camera:setPosition(pos);
+    GameViewer.camera:lookAt(ZERO, Y_AXIS);
+
+end
+
+
+local tempPosition = x3.vec3();
 function GameClient:update(dt)
 
     local k = love.keyboard.isDown;
@@ -430,10 +583,14 @@ function GameClient:update(dt)
         self:fire();
     end
 
+    local accel = 0;
+
     if k("s") then
-        cam:moveLocalZ(dt * POD_SPEED);
+        accel = -SHIP_ACCEL;
+        --cam:moveLocalZ(dt * POD_SPEED);
     elseif k("w") then
-        cam:moveLocalZ(-dt * POD_SPEED);
+        accel = SHIP_ACCEL;
+        --cam:moveLocalZ(-dt * POD_SPEED);
     end
 
     if k("d") then
@@ -460,6 +617,29 @@ function GameClient:update(dt)
     end
 
     GameViewer:update(dt);
+
+    --update ship motion
+
+    self.velocity:addScaled(cam:getRelZAxis(), -accel * dt);
+    self.velocity:scale(math.max(0.0, 1.0 - dt * SHIP_FRICTION));
+
+    tempPosition:copy(cam:getPosition());
+
+    cam:applyVelocity(self.velocity, dt);
+
+    local hit = false;
+    local curPos = cam:getPosition();
+
+    self.collider:testSphere(curPos, PLAYER_RADIUS * 1.3, function()
+        hit = true;
+    end);
+
+    if (hit) then
+        cam:setPosition(tempPosition);
+        self.velocity:set(0,0,0);
+    end
+    
+
 end
 
 --[[

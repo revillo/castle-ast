@@ -97,6 +97,12 @@ function GameCommon.receivers:killPlayer(time, clientId)
     self.players[clientId].health = 1;
     self.players[clientId].pos = {0,0,0};
 
+
+    if (self.client) then
+        if (self.clientId == clientId) then
+            self:resetPlayer();
+        end
+    end
     print("Kill Player", clientId);
 end
 
