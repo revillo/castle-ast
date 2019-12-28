@@ -8,9 +8,12 @@ local LASER_SPEED = 50;
 local PLAYER_RADIUS = 1;
 local SHIP_FRICTION = 1.0;
 local SHIP_ACCEL = 10;
-local ARENA_RADIUS = 30;
-
+local ARENA_RADIUS = 60;
+local ui = castle.ui;
 local POD_SPEED = 5;
+
+local SHIELD_COLOR = {0.2, 0.7, 1.0};
+local HEALTH_COLOR = {1.0, 0.2, 0.2};
 
 x3 = mods.x3;
 local Y_AXIS = x3.vec3(0,1,0); 
@@ -22,7 +25,8 @@ print("loaded");
 require("battle_common.lua");
 
 local Assets = {
-    Pod = x3.loadObj("assets/pod.obj")
+    Pod = x3.loadObj("assets/pod.obj"),
+    Spheroid = x3.loadObj("assets/hc.obj")
 }
 
 local Meshes = {
@@ -49,27 +53,20 @@ local GameViewer = {
     scene = x3.newEntity()
 };
 
-function GameViewer:init()
+local MenuViewer = {};
 
-    self.numLasers = 0;
-    self.laserData = {};
-    self.bursts = {};
-    self.numBursts = 0;
- 
-    --[[
-    self.moons = x3.newEntity(
-        x3.mesh.newSphere(1.0, 16, 16),
-        x3.material.newLit({
-            --baseColor = {0.9, 0.9, 1.0},
-            baseTexture = love.graphics.newImage("assets/img/mercury.jpg"),
-            hemiColors = {{0.5, 0.5, 0.5}, {1.0, 1.0, 1.0}},
-        })
-    );
-    self.scene:add(self.moons);
-    self.moons:setPosition(0,0,0);
-    self.moons:hide();
-]]
+function MenuViewer:init()
 
+    self.scene = x3.newEntity();
+    self.camera = x3.newCamera();
+
+    self.podRoot = self.scene:addNew();
+
+    self.camera:setPosition(0,0,5);
+    self.camera:lookAt(x3.vec3(0,0,0), Y_AXIS);
+
+    self.podEntities = {};
+    
     self.stars = x3.newEntity(
         x3.mesh.newSphere(0.5, 4, 4),
         x3.material.newUnlit({
@@ -93,6 +90,135 @@ function GameViewer:init()
     end
 
     self.scene:add(self.stars);
+
+    local light = x3.newPointLight({
+        position = x3.vec3(0.0, 2.0, 2.0),
+        color = {1,1,1},
+        intensity = 2
+    })
+
+    self.scene:add(light);
+
+    for name, mesh in pairs(Assets.Pod.meshesByName) do
+        local matProps = {
+            baseColor = x3.hexColor(0xFFFFFF),
+            specularColor = x3.COLOR.GRAY3,
+            hemiColors = {{0.5, 0.5, 0.5}, {1.0, 1.0, 1.0}},
+            shininess = 4
+        }
+        
+        if (name == "glass_glass_geo") then
+            matProps.baseColor = x3.hexColor(0xFFFFFF)
+            matProps.shininess = 50
+            matProps.hemiColors = {x3.COLOR.GRAY2, x3.COLOR.GRAY5}
+            matProps.specularColor = {1,1,1};
+        end
+
+        self.podEntities[name] = self.podRoot:addNew(
+            mesh,
+            x3.material.newLit(matProps)
+        );
+
+    end
+
+end
+
+
+function MenuViewer:draw(canvas)
+
+    local t = love.timer.getTime();
+    self.podRoot:setY(math.sin(love.timer.getTime() * 0.2) * 0.5);
+    self.podRoot:resetRotation();
+    self.podRoot:rotateRelY(t);
+
+
+    --self.camera:orbit_Y_UP(x3.vec3(0.0), t * 0.1,  math.sin(t * 0.01) * 0, 4);
+    self.camera:orbit_Y_UP(x3.vec3(0.0), t * 0.0,  math.sin(t * 0.01) * 0, 5);
+    
+    local w, h = love.graphics.getDimensions();
+    self.camera:setPerspective(90, h/w, 0.5, 1000.0);
+
+    x3.render(self.camera, self.scene, canvas, {
+        clearColor = {0,0,0,1}
+    });
+
+    local w, h = love.graphics.getDimensions();
+    love.graphics.draw(canvas.color, 0, h, 0, 1, -1);
+end
+
+local GAME_MODE = {
+    MENU = 0,
+    PLAY = 1
+}
+
+local GameMode = GAME_MODE.MENU;
+
+function MenuViewer:uiupdate()
+
+    local mv = self;
+
+    if (not mv.podEntities) then
+        return;
+    end
+
+    mv.colors = mv.colors or {};
+
+    local colorPicker = function(label, color, meshes)
+
+        color = mv.colors[label] or color;
+
+        color[1], color[2], color[3] = ui.colorPicker(label, color[1], color[2], color[3], 1, {
+            enableAlpha = false
+        })
+
+        mv.colors[label] = color;
+
+        for i,name in pairs(meshes) do
+            mv.podEntities[name].material.uniforms.u_BaseColor = color;
+        end
+    end
+
+    colorPicker("Pod Color", x3.hexColor(0x52FFB8), {"pod_pod_geo", "guns_guns_geo"});
+    colorPicker("Fin Color", x3.hexColor(0x830A48), {"fin_fin_geo"});
+    colorPicker("Glass Color", x3.hexColor(0x4A051C), {"glass_glass_geo"});
+    colorPicker("Laser Color", x3.hexColor(0xFAB2EA), {});
+
+    local start = ui.button("Ready!");
+
+    if (start) then
+        GameMode = GAME_MODE.PLAY; 
+        GameViewer.scene:add(self.stars);
+    end
+end
+
+function castle.uiupdate()
+    if (GameMode == GAME_MODE.MENU) then
+        MenuViewer:uiupdate();
+    end
+end
+
+function GameViewer:init()
+
+    self.numLasers = 0;
+    self.laserData = {};
+
+    self.bursts = x3.newAutomap();
+    self.damageIndicators = x3.newAutomap();
+
+    --[[
+    self.moons = x3.newEntity(
+        x3.mesh.newSphere(1.0, 16, 16),
+        x3.material.newLit({
+            --baseColor = {0.9, 0.9, 1.0},
+            baseTexture = love.graphics.newImage("assets/img/mercury.jpg"),
+            hemiColors = {{0.5, 0.5, 0.5}, {1.0, 1.0, 1.0}},
+        })
+    );
+    self.scene:add(self.moons);
+    self.moons:setPosition(0,0,0);
+    self.moons:hide();
+]]
+
 
     --[[
     self.balls = x3.newEntity(
@@ -156,7 +282,7 @@ function GameViewer:init()
 
         transparent = true,
 
-        shadeFragment = [[
+        fragShade = [[
             vec3 normal = getNormal();
             vec3 toEye = normalize(u_WorldCameraPosition - v_WorldPosition);
             float dt = dot(toEye, normal) * 0.5 + 0.5;
@@ -196,23 +322,25 @@ function GameViewer:drawHUD(player)
 
     player = player or {shield = 1, health = 1};
 
-    love.graphics.setLineWidth(3);
-    love.graphics.setColor(0,1,1,0.5);
-    love.graphics.circle("line", w * 0.5 - 7, h * 0.5, 5);
-    love.graphics.circle("line", w * 0.5 + 7, h * 0.5, 5);
+    love.graphics.setLineWidth(1);
+    love.graphics.setColor(1,1,1,0.5);
+    love.graphics.circle("line", w * 0.5 - 4, h * 0.5, 3);
+    love.graphics.circle("line", w * 0.5 + 4, h * 0.5, 3);
 
     local ox = 10;
     local sx = 100;
     local sy = 10;
 
-    love.graphics.setColor(0.2, 0.7, 1.0, 1.0);
+    love.graphics.setColor(1,1,1,1);
+
+    love.graphics.setColor(SHIELD_COLOR);
     love.graphics.rectangle("line", ox, h - 100, sx, sy)
-    love.graphics.setColor(0.2, 0.7, 1.0, 0.8);
+    love.graphics.setColor(SHIELD_COLOR[1], SHIELD_COLOR[2], SHIELD_COLOR[3], 0.8);
     love.graphics.rectangle("fill", ox, h - 100, sx * player.shield, sy)
 
-    love.graphics.setColor(1.0, 0.2, 0.2, 1.0);
+    love.graphics.setColor(HEALTH_COLOR);
     love.graphics.rectangle("line", ox, h - 80, sx, sy)
-    love.graphics.setColor(1.0, 0.2, 0.2, 0.8);
+    love.graphics.setColor(HEALTH_COLOR[1], HEALTH_COLOR[2], HEALTH_COLOR[3], 0.8);
     love.graphics.rectangle("fill", ox, h - 80, sx * player.health, sy)
 
 end
@@ -224,6 +352,8 @@ function GameViewer:draw(player)
 
     local w, h = love.graphics.getDimensions();
     love.graphics.draw(GameViewer.canvas.color, 0, h, 0, 1, -1);
+
+    self:drawDamageIndicators();
     self:drawHUD(player);
 end
 
@@ -253,13 +383,13 @@ end]]
 function GameViewer:addBurst(pos)
 
     print("spawn", pos:__tostring());
-    self.numBursts = self.numBursts+1;
-    self.bursts[self.numBursts] = x3.newEntity(
+
+    local b = x3.newEntity(
         Meshes.Particle,
         Materials.Particle
     );
 
-    local b = self.bursts[self.numBursts];
+
     b:setPosition(pos);
     b.age = 0;
 
@@ -278,24 +408,25 @@ function GameViewer:addBurst(pos)
 
     self.scene:add(b);
 
+    self.bursts:add(b);
+
 end
 
 function GameViewer:updateBursts(dt)
 
-    for bid,b in pairs(self.bursts) do
+    self.bursts:filter(function(b)
         
         for i = 1,b:getNumInstances() do
-            b:getInstance(i):moveLocalZ(-dt * 10);
+            b:getInstance(i):moveRelZ(-dt * 10);
         end
 
         b.age = b.age + dt;
 
         if (b.age > 0.2) then
-            print("remove");
             self.scene:remove(b);
-            self.bursts[bid] = nil; 
+            return true;
         end
-    end
+    end)
 
 end
 
@@ -318,7 +449,6 @@ function GameViewer:updateLasers(dt)
         ins:orient(laser.ray.direction, Y_AXIS);
         ins:setScale(1,1,10);
         
-
         --print(laser.t, laser.dist);
         --ins.origin:print();
 
@@ -369,8 +499,13 @@ function GameViewer:setPlayers(myId, players, dt)
                 --instance:setPosition(pos[1], pos[2], pos[3]);
                 --instance:setRotation(rot[1], rot[2], rot[3], rot[4]);
                 
-                instance:lerp(v3tmp, math.min(dt * 10, 1.0));
-                instance:slerp(qtmp, math.min(dt * 10, 1.0));
+                if (v3tmp:distancesq(instance:getPosition()) < 5.0) then
+                    instance:lerp(v3tmp, math.min(dt * 10, 1.0));
+                    instance:slerp(qtmp, math.min(dt * 10, 1.0));
+                else
+                    instance:setPosition(v3tmp);
+                    instance:setRotation(qtmp);
+                end
             else
                 instance:copyPosition(self.camera);
                 instance:copyRotation(self.camera);
@@ -402,6 +537,87 @@ function GameViewer:addLaser(id, ray, dist)
     };
 
     Audio.laser:play();
+
+end
+
+function GameViewer:drawDamageIndicators(dt)
+
+    local now = love.timer.getTime();
+
+    local w, h = love.graphics.getDimensions();
+
+    local rad = math.min(w,h) * 0.5;
+    local arcdist = rad * 0.15;
+
+    local bloodSum = 0.0;
+
+    self.damageIndicators:filter(function(indicator)
+        
+        local t = (now - indicator.time);
+        
+        if (t > 1.0) then
+            return true;
+        end
+
+        if (t < 0.0) then
+            return false;
+        end
+
+        bloodSum = math.max(1.0-t, bloodSum);
+
+        local sx, sy, sz = indicator.sx, indicator.sy, indicator.sz;
+        local c = indicator.color;
+
+        --Roughly Behind camera
+        if (sz > -0.3) then
+            love.graphics.setLineWidth(4);
+            local angle = math.atan2(sx, sy) + math.pi * 0.5;
+            love.graphics.setColor(c[1], c[2], c[3], 1.0 - t);
+
+            local cx = math.cos(angle + math.pi) * (rad) + w * 0.5;
+            local cy = math.sin(angle + math.pi) * (rad) + h * 0.5;
+
+            --cx = w * 0.5;
+            --cy = h * 0.5;
+
+            print(cx, cy, sy, sx, arcdist, angle, 1.0 - t);
+
+            love.graphics.arc("fill", cx, cy, arcdist, angle - 0.4, angle + 0.4, 10);
+            --love.graphics.arc("line", cx, cy, arcdist, angle - 0.1, angle + 0.1, 10);
+        end
+
+    end);
+
+    if (bloodSum > 0.0001) then
+        love.graphics.setColor(HEALTH_COLOR[1], HEALTH_COLOR[2], HEALTH_COLOR[3], bloodSum * 0.5);
+        love.graphics.rectangle("fill", 0,0,w, h);
+    end
+
+end
+
+function GameViewer:showDamage(hitPos, playerData, delay)
+
+    local hitDir = hitPos:clone();
+    hitDir:sub(self.camera:getPosition());
+    hitDir:normalize();
+
+    local sx = hitDir:dot(self.camera:getRelXAxis());
+    local sy = hitDir:dot(self.camera:getRelYAxis());
+    local sz = hitDir:dot(self.camera:getRelZAxis());
+
+    local color = HEALTH_COLOR;
+
+    if (playerData.shield > 0) then
+        color = SHIELD_COLOR;
+    end
+
+    self.damageIndicators:add({
+        sx = sx,
+        sy = sy,
+        sz = sz,
+        color = color,
+        time = love.timer.getTime() + delay
+    });
 
 end
 
@@ -481,18 +697,134 @@ function GameClient:initArena()
 
     local arenaRoot = x3.newEntity();
 
+    --[[
     local arenaSphere = x3.newEntity(
-        x3.mesh.newSphere(ARENA_RADIUS, 24, 24, true --[[flip sides]]),
+        Assets.Spheroid.mesh,
         x3.material.newLit({
             baseColor = {1,1,1},
-            hemiColors = {{0.3,0.3,0.3}, {0.1, 0.1, 0.1}},
+            hemiColors = {x3.COLOR.GRAY5, x3.COLOR.GRAY9},
             --emissiveColor = {0.3, 0.3, 0.3},
-            baseTexture = Images.Checker,
+            --baseTexture = Images.Checker,
+            --emissiveTexture = Images.Checker
+        })
+    );
+]]
+
+--[[
+    local arenaSphere = x3.newEntity(
+        --x3.mesh.newSphere(ARENA_RADIUS, 24, 24, true),
+        Assets.Spheroid.meshesByName.spheroid_lights_lights_geo,
+        x3.material.newLit({
+            baseColor = {1,1,1},
+            hemiColors = {x3.COLOR.GRAY5, x3.COLOR.GRAY9},
+            emissiveColor = x3.COLOR.GRAY5,
+            --baseTexture = Images.Checker,
+            --emissiveTexture = Images.Checker
+        })
+    );
+]]
+
+
+    --[[
+    local arenaSphere2 = x3.newEntity(
+        Assets.Spheroid.meshesByName.sphere_sphere_geo,
+        x3.material.newLit({
+            baseColor = x3.COLOR.GRAY9,
+            specularColor = x3.COLOR.GRAY9,
+            shininess = 100,
+            --hemiColors = {x3.COLOR.GRAY4, x3.COLOR.GRAY6},
+            --emissiveColor = {0.3, 0.4, 0.8},
+            --baseTexture = Images.Checker,
             --emissiveTexture = Images.Checker
         })
     );
 
-    arenaRoot:add(arenaSphere);
+    --arenaSphere:setScale(ARENA_RADIUS);
+    arenaSphere2:setScale(ARENA_RADIUS);
+
+    --arenaRoot:add(arenaSphere);
+    arenaRoot:add(arenaSphere2);
+
+    local rl = x3.newPointLight({
+        color = x3.hexColor(0x931621),
+        intensity = 10,
+        position = x3.vec3(0, ARENA_RADIUS * 0.9, 0)
+    });
+
+    local gl = x3.newPointLight({
+        color = x3.hexColor(0x33FFAA),
+        intensity = 10,
+        position = x3.vec3(-ARENA_RADIUS * 0.63, -ARENA_RADIUS * 0.63, 0)
+    });
+
+    local bl = x3.newPointLight({
+        color = x3.hexColor(0x2E5EAA),
+        intensity = 10,
+        position = x3.vec3(ARENA_RADIUS * 0.63, -ARENA_RADIUS * 0.63, 0)
+    });
+
+
+    arenaRoot:add(rl);
+    arenaRoot:add(gl);
+    arenaRoot:add(bl);
+    ]]
+
+
+    local arenaShaderOpts = {
+        defines = {
+            LIGHTS = 0,
+            INSTANCES = 1
+        },
+
+        fragHead = [[
+            extern float u_AlphaMin;
+            extern float u_AlphaMax;
+        ]],
+
+        transparent = true,
+
+        fragShade = [[
+            float distPlayer = length(v_WorldPosition - u_WorldCameraPosition);
+            highp float alpha = mix(u_AlphaMax, u_AlphaMin, min(1.0, distPlayer/100.0));
+
+            if (u_AlphaMax < 0.8)
+                alpha *= 0.9 + 0.1 * sin((v_WorldPosition.x + v_WorldPosition.z) * 20.0 + u_Time * 5.0);
+            outColor = vec4(1.0, 1.0, 1.0, alpha);
+        ]]
+    };
+
+    local panels = x3.newEntity(
+        Assets.Spheroid.meshesByName.hc_panels_pns_geo,
+        --x3.mesh.newSphere(1.0, 24, 24, true),
+
+        x3.material.newCustom(
+            x3.shader.newCustom(arenaShaderOpts), 
+            {
+                u_AlphaMin = 0.0,
+                u_AlphaMax = 0.7
+            } 
+        )
+    );
+
+    local beams = x3.newEntity(
+        Assets.Spheroid.meshesByName.hc_beams_bms_geo,
+        --x3.mesh.newSphere(1.0, 24, 24, true),
+
+        x3.material.newCustom(
+            x3.shader.newCustom(arenaShaderOpts), 
+            {
+                u_AlphaMin = 0.1,
+                u_AlphaMax = 1.0
+            } 
+        )
+    );
+
+    panels:setScale(ARENA_RADIUS);
+    beams:setScale(ARENA_RADIUS);
+
+    arenaRoot:add(panels);
+    arenaRoot:add(beams);
+
     GameViewer.scene:add(arenaRoot);
 
 end
@@ -500,6 +832,7 @@ end
 function GameClient:start()
     print("initing...")
     GameViewer:init();
+    MenuViewer:init();
     GameViewer:resize();
     self:init();
     print("inited");
@@ -512,6 +845,8 @@ function GameClient:start()
     self:initArena();
 
     self.velocity = x3.vec3(0.0);
+
+    self:resetPlayer();
 
     --[[
     local numMoons = 40;
@@ -541,12 +876,15 @@ function GameClient:start()
 end
 
 function GameClient:keypressed(key)
-    if (key == "space") then
-      love.mouse.setRelativeMode(not love.mouse.getRelativeMode())
-    end
 
-    if (key == "r") then
-        self:resetPlayer();
+    if (GameMode == GAME_MODE.PLAY) then
+        if (key == "space") then
+        love.mouse.setRelativeMode(not love.mouse.getRelativeMode())
+        end
+
+        if (key == "r") then
+            self:resetPlayer();
+        end
     end
 end
 
@@ -554,27 +892,55 @@ function GameClient:removePlayer(clientId)
     self.collider:remove("p"..clientId);
 end
 
+
 local rayTemp = x3.ray();
-function GameClient:handleLaser(rayData, dist)
+function GameClient:handleLaser(rayData, dist, hitId)
     self.laserId = self.laserId + 1;
     rayTemp:deserialize(rayData);
     GameViewer:addLaser(self.laserId, rayTemp, dist);
+
+    local delay = dist / LASER_SPEED;
+
+    if (hitId and hitId == self.clientId) then
+        GameViewer:showDamage(rayTemp:at(dist), self.players[self.clientId], delay);
+    end
 end
+
+--[[
+function GameClient:handleDamage(clientId, shieldDmg, healthDmg)
+
+    if (clientId == self.clientId) then
+
+        
+
+    end
+end]]
 
 local ZERO = x3.vec3(0.0);
 
 function GameClient:resetPlayer()
-
     local pos = x3.vec3();
     pos:fromSphere(math.random() * 6, math.random() * 6, ARENA_RADIUS - 3);
     GameViewer.camera:setPosition(pos);
     GameViewer.camera:lookAt(ZERO, Y_AXIS);
-
 end
 
 
 local tempPosition = x3.vec3();
 function GameClient:update(dt)
+
+    if (GameMode == GAME_MODE.MENU) then
+        return;
+    end
+
+    --[[
+    if (self.timer:ezCooldown("test", 1.0)) then
+        local tp = x3.vec3(0.0, 100.0, 0.0);
+        --tp:copy(GameViewer.camera:getPosition());
+        --tp:addScaled(GameViewer.camera:getRelZAxis(), -2.0);
+        GameViewer:showDamage(tp, {shield = 1.0})
+    end
+    ]]
 
     local k = love.keyboard.isDown;
     local cam = GameViewer.camera;
@@ -594,9 +960,9 @@ function GameClient:update(dt)
     end
 
     if k("d") then
-        cam:rotateLocalZ(-dt * 2);
+        cam:rotateRelZ(-dt * 2);
     elseif k("a")  then
-        cam:rotateLocalZ(dt * 2);
+        cam:rotateRelZ(dt * 2);
     end
 
 
@@ -655,12 +1021,21 @@ end
 function GameClient:mousemoved(x, y, dx, dy)
     --GameViewer.camera:rotateAxis(GameViewer.UP, dx * 0.01);
     --GameViewer.camera:rotateLocalX(dy * 0.01);
+    if (GameMode == GAME_MODE.MENU) then
+        return;
+    end
+
     local scale = 0.01;
-    GameViewer.camera:rotateLocalX(-dy * scale);
-    GameViewer.camera:rotateLocalY(-dx * scale);
+    GameViewer.camera:rotateRelX(-dy * scale);
+    GameViewer.camera:rotateRelY(-dx * scale);
 end
 
 function GameClient:draw()
+    if (GameMode == GAME_MODE.MENU) then
+        MenuViewer:draw(GameViewer.canvas);
+        return;
+    end
+
     local me = self.players[self.clientId];
     GameViewer:draw(me);
 end

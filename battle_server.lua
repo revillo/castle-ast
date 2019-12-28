@@ -13,12 +13,13 @@ require("battle_common");
 function GameServer:start()
     self:init();
 
+    --[[
     self.players["test"] = {
         pos = {0, 0, 0},
         rot = {0,0,0,1},
         health = 1,
         shield = 1
-    }
+    }]]
 end
 
 

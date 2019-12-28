@@ -121,9 +121,9 @@ function GameCommon.receivers:laserHit(time, client, ray, dist, hitId)
         local healthDmg = 0;
 
         if (player.shield > 0) then
-            shieldDmg = 0.5;
+            shieldDmg = 0.2;
         else
-            healthDmg = 0.5;
+            healthDmg = 0.1;
         end
 
         if (self.server) then
@@ -135,8 +135,16 @@ function GameCommon.receivers:laserHit(time, client, ray, dist, hitId)
 
     if (self.client) then
         print("over here");
-        self:handleLaser(ray, dist);
+        self:handleLaser(ray, dist, hitId);
+        
+        --[[
+        if (self.client) then
+            self:handleDamage(clientId, shieldDmg, healthDmg);
+        end
+        ]]
     end
+
+    
 end
 
 function GameCommon.receivers:damagePlayer(time, clientId, shieldDmg, healthDmg)
@@ -148,6 +156,7 @@ function GameCommon.receivers:damagePlayer(time, clientId, shieldDmg, healthDmg)
     if (player.health <= 0.0 and self.server) then
         self:send({kind = 'killPlayer'}, clientId);
     end
+
 end
 
 function GameCommon.receivers:fullState(time, state)
