@@ -11,6 +11,13 @@ function GameCommon:define()
         selfSend = false,
     });
 
+    self:defineMessageKind('playerReady', {
+        reliable = true,
+        channel = 0,
+        selfSend = false,
+        forward = false
+    });
+
     self:defineMessageKind('addPlayer', {
         reliable = true,
         channel = 0,
@@ -44,14 +51,14 @@ function GameCommon:define()
     self:defineMessageKind('laserHit', {
         reliable = true,
         channel = 0,
-        selfSend = false,
-        forward = true
+        selfSend = true,
+        forward = false
     });
 
     self:defineMessageKind('laserMiss', {
         reliable = false,
         channel = 1,
-        selfSend = false,
+        selfSend = true,
         forward = true
     });
 
@@ -64,24 +71,28 @@ function GameCommon:define()
 
 end
 
+
 function GameCommon.receivers:playerUpdate(time, clientId, player)
     local mPlayer = self.players[clientId];
 
     mPlayer.pos = player.pos;
     mPlayer.rot = player.rot;
+    mPlayer.shield = player.shield;
+    mPlayer.health = player.health;
 end
 
 function GameCommon.receivers:addPlayer(time, clientId, player)
-    self.players[clientId] = player
+    self.players[clientId] = player;
+    
     
     if(self.onPlayerAdded) then
         self:onPlayerAdded(clientId, player)
     end
 
-    print("Add Player", clientId);
+    print("Add Player = ", clientId, player.pos[1], player.pos[2]);
 end
 
-function GameCommon.receivers:removePlayer(time, clientId, x, y, z)
+function GameCommon.receivers:removePlayer(time, clientId)
     self.players[clientId] = nil;
     
     if (self.removePlayer) then
@@ -95,14 +106,14 @@ function GameCommon.receivers:killPlayer(time, clientId)
 
     self.players[clientId].shield = 1;
     self.players[clientId].health = 1;
-    self.players[clientId].pos = {0,0,0};
-
+    self.players[clientId].pos = {0,-200,0};
 
     if (self.client) then
         if (self.clientId == clientId) then
-            self:resetPlayer();
+            self:die();
         end
     end
+
     print("Kill Player", clientId);
 end
 
@@ -110,6 +121,19 @@ function GameCommon.receivers:laserMiss(time, client, ray, dist, hitId)
     if (self.client) then
         self:handleLaser(ray, dist);
     end
+end
+
+local function rayHitClose(ray, dist, player)
+    local hx,hy,hz = ray.origin[1] + (ray.direction[1]) * dist,
+    ray.origin[2] + (ray.direction[2]) * dist,
+    ray.origin[3] + (ray.direction[3]) * dist;
+
+    local dx, dy, dz = hx - player.pos[1], hy - player.pos[2], hz - player.pos[3];
+
+    local distsq = (dx * dx + dy * dy + dz * dz);
+
+    print("Distsq", distsq, player.health);
+    return distsq < 4;
 end
 
 function GameCommon.receivers:laserHit(time, client, ray, dist, hitId)
@@ -122,31 +146,44 @@ function GameCommon.receivers:laserHit(time, client, ray, dist, hitId)
 
         if (player.shield > 0) then
             shieldDmg = 0.2;
-        else
+        elseif (player.health > 0.0) then
             healthDmg = 0.1;
         end
 
         if (self.server) then
-            self:send({kind = 'damagePlayer'}, hitId, shieldDmg, healthDmg);
-        end
+            --self:send({kind = 'damagePlayer'}, hitId, shieldDmg, healthDmg);
+          
+            --self:send({kind='laserHit', selfSend=false, to='all'}, client, ray, dist, hitId);
+            
+            if (rayHitClose(ray, dist, player)) then
 
-        print("Damage Player", hitId, shieldDmg, healthDmg);
-    end
+                local player = self.players[hitId];
 
-    if (self.client) then
-        print("over here");
-        self:handleLaser(ray, dist, hitId);
-        
-        --[[
-        if (self.client) then
-            self:handleDamage(clientId, shieldDmg, healthDmg);
-        end
-        ]]
-    end
-
+                player.shield = math.max(0, player.shield - shieldDmg);
+                player.health = math.max(0, player.health - healthDmg);
     
+                for cid, pl in pairs(self.players) do
+                    if (cid ~= client) then
+                        self:send({kind='laserHit', selfSend=false, to=cid}, client, ray, dist, hitId);
+                    end
+                end
+
+
+                if (player.health <= 0.0) then
+                    self:send({kind = 'killPlayer'}, hitId);
+                end
+
+            end
+        else
+            self:handleLaser(ray, dist, hitId, shieldDmg, healthDmg);
+        end
+    end
+
 end
 
+
+
+--[[
 function GameCommon.receivers:damagePlayer(time, clientId, shieldDmg, healthDmg)
     local player = self.players[clientId];
 
@@ -156,8 +193,8 @@ function GameCommon.receivers:damagePlayer(time, clientId, shieldDmg, healthDmg)
     if (player.health <= 0.0 and self.server) then
         self:send({kind = 'killPlayer'}, clientId);
     end
-
 end
+]]
 
 function GameCommon.receivers:fullState(time, state)
     self.players = state.players;

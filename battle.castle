@@ -1,0 +1,7 @@
+main: battle_client.lua
+multiplayer:
+    enabled: true
+    serverMain: battle_server.lua
+title: Multiplayer Space Battle
+owner: revillo
+description: Shoot Ships Man

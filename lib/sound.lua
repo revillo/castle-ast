@@ -53,6 +53,14 @@ function Sound:setNextVolume(vlm)
   self.sources[self.index]:setVolume(vlm);
 end
 
+function Sound:setNextPosition(x,y,z)
+  self.sources[self.index]:setPosition(x,y,z);
+end
+
+function Sound:setNextVelocity(x,y,z)
+  self.sources[self.index]:setVelocity(x,y,z);
+end
+
 
 function Sound:setVolume(vlm)
   

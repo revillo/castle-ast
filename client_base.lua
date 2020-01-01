@@ -8,10 +8,10 @@ end
 
 local x3 = require(BASE_DIR.."/x3/x3.lua");
 
-local ClientCommon = require(BASE_DIR.."/multiplayer-tests/client.lua");
+local Game = require(BASE_DIR.."/multiplayer-tests/client.lua");
 
-local GameClient = ClientCommon.GameClient;
-local GameCommon = ClientCommon.GameCommon;
+local GameClient = Game.Client;
+local GameCommon = Game.Common;
 
 return {
     x3 = x3,

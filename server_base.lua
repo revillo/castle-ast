@@ -8,9 +8,9 @@ do
     print(BASE_URL);
 end
 
-local ServerCommon = require(BASE_DIR.."/multiplayer-tests/server.lua");
+local Game = require(BASE_DIR.."/multiplayer-tests/server.lua");
 
 return {
-    GameCommon = ServerCommon.GameCommon,
-    GameServer = ServerCommon.GameServer
+    GameCommon = Game.Common,
+    GameServer = Game.Server
 }
